@@ -29,7 +29,7 @@ def print_log(msg: str, log_path='log.txt'):
 sleep_time = 3
 is_sleep = 1
 download_path = os.getcwd()+'/competition/download'
-
+current_match_name = ''
 def sleep():
     if is_sleep:
         time.sleep(random.uniform(1,3))
@@ -190,7 +190,7 @@ class Reptile:
         return target_path
 
     def process_oupei(self, match_status: MatchStatus,
-                      save_dic_path: str = '{0}/competition/europe'.format(os.getcwd())):
+                      save_dic_path: str = ('{0}/competition/europe/' + current_match_name).format(os.getcwd())):
         xml_path = self.match_and_move_download_file(save_dic_path, '欧洲数据', match_status.timestamp.split(' ')[0])
 
         if not xml_path:
@@ -211,7 +211,7 @@ class Reptile:
         pass
 
     def process_yapan(self, match_status: MatchStatus,
-                      save_dic_path: str = '{0}/competition/asia_andicap'.format(os.getcwd())):
+                      save_dic_path: str = ('{0}/competition/asia_andicap/' + current_match_name).format(os.getcwd())):
         xml_path = self.match_and_move_download_file(save_dic_path, '亚盘', match_status.timestamp.split(' ')[0])
 
         if not xml_path:
@@ -306,7 +306,8 @@ class Reptile:
 
         while i < len(five_match):
             if len(season_url_list) <= 0:
-                self.go_to_match(driver, five_match[i], season_url_list)
+                current_match_name = five_match[i]
+                self.go_to_match(driver, current_match_name, season_url_list)
                 j = 2  # 2 开始是因为 2002 赛季开始才有欧赔指数
 
             while j < len(season_url_list):
