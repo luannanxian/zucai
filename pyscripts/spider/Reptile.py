@@ -3,17 +3,22 @@
 '''
 
 import os
+import random
 import traceback
 
 from selenium import webdriver
-from selenium.webdriver.common.by import By
+from selenium.common import StaleElementReferenceException
 import time
+
+from selenium.webdriver.support.wait import WebDriverWait
+
 from MatchStatus import *
 from Schedule import *
 import re
 import shutil
 import pandas as pd
-
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
 
 def print_log(msg: str, log_path='log.txt'):
     localtime = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
@@ -22,14 +27,22 @@ def print_log(msg: str, log_path='log.txt'):
 
 
 sleep_time = 3
+is_sleep = 1
+download_path = os.getcwd()+'/competition/download'
+
+def sleep():
+    if is_sleep:
+        time.sleep(random.uniform(1,3))
+
 
 class Reptile:
+
     def dump_and_delay(self, driver: webdriver.chrome, url: str):
         print_log('跳转网页{0}'.format(url))
         driver.get(url)
         windows = driver.window_handles
         driver.switch_to.window(windows[-1])
-        time.sleep(3)  # 防止反爬虫检测
+        sleep()  # 防止反爬虫检测
 
     # 先进入对应的联赛，然后爬出所有的赛季网址，再遍历所有网址拿到联赛数据
     def go_to_match(self, driver: webdriver.chrome, match_name: str, out_season_url_list: list):
@@ -54,7 +67,10 @@ class Reptile:
             rounds = driver.find_elements(By.XPATH, '//span[@class="lcol_hd_lun"]/a')
             rounds[0].click()
             cur_round_index += 1
-            time.sleep(3)
+            sleep()
+            print_log("---get_season_data----get round:"+str(sche.cur_round_index-cur_round_index))
+            if cur_round_index == sche.cur_round_index:
+                print("====")
 
         self.get_round_data(driver, url, cur_round_index)  # 回来后还是 cur_round_index
 
@@ -64,7 +80,7 @@ class Reptile:
             # 进入下一轮
             rounds = next_round[0].find_elements(By.XPATH, './/a')
             rounds[0].click()
-            time.sleep(4)
+            sleep()
             cur_round_index += 1
 
             self.get_round_data(driver, url, cur_round_index)
@@ -78,17 +94,28 @@ class Reptile:
         i = 0
         count = len(all_match)
         while i < count:
-            all_match = driver.find_elements(By.XPATH, '//tbody[@class="jTrInterval"]/tr')
-            m_info = all_match[i].find_elements(By.XPATH, './/td')
-            i += 1
+            try:
 
-            timestamp = m_info[0].text.strip()
-            home_team = m_info[1].text.strip()
-            away_team = m_info[3].text.strip()
+                all_match = driver.find_elements(By.XPATH, '//tbody[@class="jTrInterval"]/tr')
+                m_info = all_match[i].find_elements(By.XPATH, './/td')
+                # wait = WebDriverWait(driver, 10)
+                # all_match = wait.until(EC.presence_of_element_located((By.XPATH, '//tbody[@class="jTrInterval"]/tr')))
+                # m_info = all_match[i].find_elements(By.XPATH, './/td')
+                i += 1
+                sleep()
+                for j in range(len(m_info)):
+                    print_log(m_info[j].text.strip())
+                timestamp = m_info[0].text.strip()
+                home_team = m_info[1].text.strip()
+                away_team = m_info[3].text.strip()
+            except StaleElementReferenceException :
+                self.get_round_data(driver, url, round_index)
             match_status = MatchStatus(timestamp, home_team, away_team)
-
             # 还没出比赛结果 或 没有平均欧指
             # 如果已经保存了，就不再保存
+            print_log('m_info[2].text.lower() = ' + m_info[2].text.lower())
+            print_log('m_info[3].text.lower() = ' + m_info[5].text.strip())
+            print_log(match_status.get_save_path())
             if ('vs' in m_info[2].text.lower()) or (len(m_info[5].text.strip()) <= 0) or os.path.exists(
                     match_status.get_save_path()):
                 continue
@@ -104,7 +131,7 @@ class Reptile:
                 cur_round_index += 1
                 rounds = driver.find_elements(By.XPATH, '//span[@class="lcol_hd_lun"]/a')
                 rounds[0].click()
-                time.sleep(4)
+                sleep()
 
     def get_match_data(self, driver: webdriver.chrome, match_status: MatchStatus):
         score_str = driver.find_element(By.XPATH,
@@ -115,11 +142,11 @@ class Reptile:
             return
         match_status.set_score([int(score[0]), int(score[1])])
 
-        time.sleep(4)
+        sleep()
         driver.find_element(By.XPATH, '//ul[@class="odds_nav_list"]/li[contains(@onclick, "ouzhi")]').click()
         olddownpl = driver.find_element(By.XPATH, '//tr[@xls="header"]/th/a[contains(@class, "olddownpl")]')
         olddownpl.click()  # 下载欧赔
-        time.sleep(4)
+        sleep()
         print_log('finish down ouzhi step:{0} {1} vs {2}'.format(match_status.timestamp, match_status.home_team,
                                                                  match_status.away_team))
         try:  # 可能 excel 解析错误
@@ -131,7 +158,7 @@ class Reptile:
         driver.find_element(By.XPATH, '//ul[@class="odds_nav_list"]/li[contains(@onclick, "yazhi")]').click()
         downpl = driver.find_element(By.XPATH, '//tr[@xls="header"]/th/a[contains(@class, "downpl")]')
         downpl.click()  # 下载亚盘
-        time.sleep(4)
+        sleep()
         print_log('finish down yapan step:{0} {1} vs {2}'.format(match_status.timestamp, match_status.home_team,
                                                                  match_status.away_team))
         self.process_yapan(match_status)
@@ -140,11 +167,10 @@ class Reptile:
         pass
 
     def match_and_move_download_file(self, save_dic_path: str, pattern: str, prefix: str = '', try_times: int = 10):
-        download_path = 'competition/download'
         tf = None
         cnt = 0
         while (not tf) and cnt < try_times:
-            time.sleep(2)
+            sleep()
             print_log('等待下载完成')
             files = os.listdir(download_path)
             for f in files:
@@ -199,14 +225,8 @@ class Reptile:
             y = YaPan(v[0], yapan)
             match_status.add_yapan(y)
         pass
-
-    def begin(self):
-        # 浏览器设置
-        # options = webdriver.EdgeOptions()
-
+    def init_chrome_setting(self):
         options = webdriver.ChromeOptions()
-
-        # 添加UA
         options.add_argument(
             'user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/70.0.3538.67 Safari/537.36"')
 
@@ -220,10 +240,10 @@ class Reptile:
         options.add_argument('--hide-scrollbars')
 
         # 不加载图片, 提升速度
-        options.add_argument('blink-settings=imagesEnabled=false')
+        # options.add_argument('blink-settings=imagesEnabled=false')
 
         # 浏览器不提供可视化页面. linux下如果系统不支持可视化不加这条会启动失败
-        options.add_argument('--headless')
+        # options.add_argument('--headless')
 
         # 以最高权限运行
         options.add_argument('--no-sandbox')
@@ -244,9 +264,16 @@ class Reptile:
         prefs = {
             'profile.default_content_setting_values': {
                 'notifications': 2
-            }
+            },
+            'download.default_directory': download_path
         }
         options.add_experimental_option('prefs', prefs)
+        return options
+    def begin(self):
+        # 浏览器设置
+        # options = webdriver.EdgeOptions()
+
+
 
 
         # options.add_argument('headless') # 无界面
@@ -255,7 +282,10 @@ class Reptile:
 
         # 开始启动浏览器
         print_log('begin')
-        driver = webdriver.Chrome(options=options)
+        # service = webdriver.ChromeService("/usr/local/bin/chromedriver")
+        # driver = webdriver.Chrome(options=self.init_chrome_setting(), service=service)
+        driver = webdriver.Chrome(options=self.init_chrome_setting())
+
         # driver = webdriver.Edge(options=options, service=service)
 
         driver.implicitly_wait(10)  # 隐式等待
